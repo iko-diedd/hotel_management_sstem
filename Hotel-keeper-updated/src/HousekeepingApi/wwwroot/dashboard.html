@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard</title><script src="js/theme.js"></script><link rel="stylesheet" href="css/app.css"></head>
+<body>
+<header class="app-bar" id="appbar"></header>
+<main class="wrap" id="main">
+<div class="page-head"><div><h1>Dashboard</h1><p id="sub">Live overview of rooms and housekeeping.</p></div></div>
+<section class="panel"><div class="panel-head"><h2>Key figures</h2></div><div id="kpi" class="stats"><p class="msg">Loading…</p></div></section>
+<section class="panel"><div class="panel-head"><h2>Rooms by status</h2></div><div id="rooms" class="stats"></div></section>
+<section class="panel"><div class="panel-head"><h2>Housekeeping notices</h2></div><div id="notices" class="stats"></div></section>
+</main>
+<script src="js/config.js"></script><script src="js/common.js"></script>
+<script>
+requireRole();
+const tiles = o => Object.entries(o).map(([k, v]) => { const l = label(k); return statTile(l, v, STATUS_ICON[l] || 'clipboard', cls(l)); }).join('');
+async function load() {
+  try {
+    const d = await api('/dashboard');
+    const avg = d.averageCompletionMinutesLast7Days;
+    $('#kpi').innerHTML =
+      statTile('Occupancy', d.occupancyPercent + '%', 'building', 'occupied') +
+      statTile('Available rooms', d.availableRooms, 'checkCircle', 'available') +
+      statTile('Open notices', d.openNotices, 'clipboard', '') +
+      statTile('Overdue (> ' + d.overdueAfterMinutes + ' min)', d.overdueNotices, 'clock', d.overdueNotices ? 'dirty' : '') +
+      statTile('Completed today', d.noticesCompletedToday, 'checkCircle', 'available') +
+      statTile('Avg. cleaning time (7 d)', avg == null ? '—' : Math.round(avg) + ' min', 'clock', '');
+    $('#rooms').innerHTML = statTile('Total rooms', d.totalRooms, 'bed', '') + tiles(d.roomsByStatus);
+    $('#notices').innerHTML = tiles(d.noticesByStatus);
+    $('#sub').textContent = 'Live overview of rooms and housekeeping. Oldest open notice: ' + fmt(d.oldestOpenNoticeAt) + ' · Day boundaries use ' + d.timeZone + '.';
+  } catch (x) { $('#kpi').innerHTML = '<p class="msg error">' + esc(x.message) + '</p>'; }
+}
+initShell(); load(); setInterval(load, 15000);
+</script></body></html>

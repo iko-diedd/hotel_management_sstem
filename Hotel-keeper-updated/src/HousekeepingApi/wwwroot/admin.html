@@ -1,0 +1,112 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin</title><script src="js/theme.js"></script><link rel="stylesheet" href="css/app.css"></head>
+<body>
+<header class="app-bar" id="appbar"></header>
+<main class="wrap" id="main">
+<div class="page-head"><div><h1>Admin</h1><p>Manage rooms and staff accounts.</p></div></div>
+<section id="summary" class="stats" aria-label="Summary"></section>
+<section class="panel"><div class="panel-head"><h2>Rooms</h2><div class="toolbar"><div id="toolbar" class="toolbar"></div><button class="btn primary" id="add"></button></div></div>
+<div class="tw"><table class="stack"><thead><tr><th scope="col">Room</th><th scope="col">Type</th><th scope="col" class="hide-sm">Floor</th><th scope="col">Status</th><th scope="col" class="hide-sm">Availability</th><th scope="col">Actions</th></tr></thead>
+<tbody id="rows"><tr><td colspan="6" class="msg">Loading rooms…</td></tr></tbody></table></div></section>
+<section class="panel"><div class="panel-head"><h2>Staff accounts</h2><button class="btn primary" id="addu"></button></div>
+<div class="tw"><table class="stack"><thead><tr><th scope="col">Name</th><th scope="col">Username</th><th scope="col">Role</th><th scope="col">Account</th><th scope="col">Actions</th></tr></thead>
+<tbody id="urows"><tr><td colspan="5" class="msg">Loading staff…</td></tr></tbody></table></div></section></main>
+
+<dialog id="rd"><form id="rf"><h2 id="rt">Add room</h2>
+<label>Room number<input id="rn" required maxlength="10" pattern="[A-Za-z0-9\-]{1,10}" title="Letters, digits or hyphen"></label>
+<label>Room type<input id="rty" required maxlength="50" list="types"></label><datalist id="types"></datalist>
+<label>Floor<input id="rfl" type="number" min="0" max="200" required></label>
+<label>Description (optional)<input id="rds" maxlength="500"></label>
+<div class="row"><button type="button" class="btn" id="rc">Cancel</button><button class="btn primary">Save</button></div></form></dialog>
+
+<dialog id="ud"><form id="uf"><h2 id="ut">Add staff member</h2>
+<label>Full name<input id="un" required maxlength="100"></label>
+<label>Username<input id="uu" required maxlength="50" pattern="[A-Za-z0-9._\-]{3,50}" title="3-50 letters, digits, . _ -" autocomplete="off"></label>
+<label id="upl">Password<input id="up" type="password" maxlength="128" autocomplete="new-password"></label>
+<p class="hint" id="uph">At least 10 characters with an uppercase letter, a lowercase letter and a digit.</p>
+<label>Role<select id="ur"><option value="RoomAssistant">Room Assistant</option><option value="Housekeeper">Housekeeper</option><option value="Admin">Admin</option></select></label>
+<label class="chk"><input id="ua" type="checkbox" checked> Account active</label>
+<div class="row"><button type="button" class="btn" id="uc">Cancel</button><button class="btn primary">Save</button></div></form></dialog>
+
+<script src="js/config.js"></script><script src="js/common.js"></script>
+<script>
+requireRole();
+let rooms = [], users = [], editing = null, editingUser = null;
+$('#add').innerHTML = icon('plus') + 'Add room'; $('#addu').innerHTML = icon('plus') + 'Add staff member';
+
+function draw() {
+  const l = filtered(rooms);
+  $('#rows').innerHTML = l.length ? l.map(r => { const d = a => ({ a, r: r.roomNumber }); return `<tr><td><b>${esc(r.roomNumber)}</b></td><td>${esc(r.roomType)}</td><td class="hide-sm">${esc(r.floor)}</td><td>${badge(r.status)}</td><td class="hide-sm">${esc(r.availability)}</td>
+    <td><div class="actions">${btn('Edit', 'pencil', { data: d('edit') })}
+    ${r.status === 'Out of Service' ? btn('Restore', 'undo', { data: d('restore'), cls: 'primary', tip: 'Restore to service (the room will need cleaning)' }) : btn('', 'ban', { data: d('oos'), tip: 'Take out of service' })}
+    ${btn('', 'trash', { data: d('del'), cls: 'danger', tip: 'Remove room' })}</div></td></tr>`; }).join('') : msgRow(6, 'No rooms match your search.');
+  $('#types').innerHTML = [...new Set(['Standard', 'Deluxe', 'Suite', ...rooms.map(r => r.roomType)])].map(t => `<option value="${esc(t)}">`).join('');
+}
+function drawUsers() {
+  $('#urows').innerHTML = users.length ? users.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.username)}</td><td>${esc(ROLE_LABEL[u.role] || u.role)}</td>
+    <td>${badge(u.isActive ? 'Active' : 'Inactive')}</td>
+    <td><div class="actions">${btn('Edit', 'pencil', { data: { a: 'uedit', id: u.id } })}${btn('Reset password', 'lock', { data: { a: 'upw', id: u.id } })}</div></td></tr>`).join('') : msgRow(5, 'No staff accounts.');
+}
+
+function openForm(r) {
+  editing = r || null; $('#rt').textContent = r ? 'Edit room' : 'Add room';
+  $('#rn').value = r?.roomNumber || ''; $('#rty').value = r?.roomType || 'Standard'; $('#rfl').value = r?.floor ?? 1; $('#rds').value = r?.description || ''; $('#rd').showModal();
+}
+$('#add').onclick = () => openForm(); $('#rc').onclick = () => $('#rd').close();
+$('#rows').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return; const n = b.dataset.r, room = rooms.find(r => r.roomNumber === n); if (!room) return;
+  try {
+    if (b.dataset.a === 'edit') return openForm(room);
+    if (b.dataset.a === 'del') {
+      if (!await confirmBox(`Remove room ${n}? This cannot be undone.`, 'Remove')) return;
+      await api(`/admin/rooms/${room.id}?expectedVersion=${room.version}`, { method: 'DELETE' }); toast(`Room ${n} removed.`);
+    } else if (b.dataset.a === 'oos') {
+      const reason = await askText(`Why is room ${n} going out of service?`, { placeholder: 'e.g. Water leak' }); if (!reason) return;
+      await api(`/rooms/${room.id}/status`, { method: 'PATCH', body: { status: 'OutOfService', reason, expectedVersion: room.version } }); toast(`Room ${n} is out of service.`);
+    } else if (b.dataset.a === 'restore') {
+      if (!await confirmBox(`Restore room ${n} to service? It will be marked Dirty and must be cleaned before it is Available.`, 'Restore')) return;
+      await api(`/admin/rooms/${room.id}/restore`, { method: 'POST', body: { confirmUnoccupiedAndReady: false, expectedVersion: room.version } }); toast(`Room ${n} restored (needs cleaning).`);
+    }
+    load();
+  } catch (x) { toast(x.message, true); load(); }
+};
+$('#rf').onsubmit = async e => {
+  e.preventDefault();
+  const body = { roomNumber: $('#rn').value, roomType: $('#rty').value, floor: +$('#rfl').value, description: $('#rds').value || null };
+  try {
+    if (editing) await api(`/admin/rooms/${editing.id}`, { method: 'PUT', body: { ...body, expectedVersion: editing.version } });
+    else await api('/admin/rooms', { method: 'POST', body });
+    $('#rd').close(); toast(editing ? 'Room updated.' : 'Room added.'); load();
+  } catch (x) { toast(x.message, true); }
+};
+
+function openUser(u) {
+  editingUser = u || null; $('#ut').textContent = u ? 'Edit staff member' : 'Add staff member';
+  $('#un').value = u?.name || ''; $('#uu').value = u?.username || ''; $('#uu').disabled = !!u;
+  $('#up').value = ''; $('#up').required = !u; $('#upl').hidden = !!u; $('#uph').hidden = !!u;
+  $('#ur').value = u?.role || 'RoomAssistant'; $('#ua').checked = u ? u.isActive : true; $('#ua').disabled = !u; $('#ud').showModal();
+}
+$('#addu').onclick = () => openUser(); $('#uc').onclick = () => $('#ud').close();
+$('#urows').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return; const u = users.find(x => x.id == b.dataset.id); if (!u) return;
+  if (b.dataset.a === 'uedit') return openUser(u);
+  const pw = await askText(`New password for ${u.username}`, { type: 'password', placeholder: '10+ chars, upper, lower, digit', max: 128 }); if (!pw) return;
+  try { await api(`/admin/users/${u.id}/reset-password`, { method: 'POST', body: { newPassword: pw } }); toast(`Password reset for ${u.username}.`); } catch (x) { toast(x.message, true); }
+};
+$('#uf').onsubmit = async e => {
+  e.preventDefault();
+  try {
+    if (editingUser) await api(`/admin/users/${editingUser.id}`, { method: 'PUT', body: { name: $('#un').value, role: $('#ur').value, isActive: $('#ua').checked } });
+    else await api('/admin/users', { method: 'POST', body: { name: $('#un').value, username: $('#uu').value, password: $('#up').value, role: $('#ur').value } });
+    $('#ud').close(); toast(editingUser ? 'Staff member updated.' : 'Staff member added.'); loadUsers();
+  } catch (x) { toast(x.message, true); }
+};
+async function loadUsers() {
+  try { users = await api('/admin/users'); drawUsers(); } catch (x) { $('#urows').innerHTML = msgRow(5, x.message, true); }
+}
+async function load() {
+  try { rooms = (await api('/rooms')).map(normRoom); } catch (x) { $('#rows').innerHTML = msgRow(6, x.message, true); return; }
+  summary(rooms); draw();
+}
+initShell(draw); load(); loadUsers(); setInterval(load, 20000);
+</script></body></html>

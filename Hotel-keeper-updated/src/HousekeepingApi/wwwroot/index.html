@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Room Availability</title><script src="js/theme.js"></script><link rel="stylesheet" href="css/app.css"></head>
+<body>
+<header class="app-bar" id="appbar"></header>
+<main class="wrap" id="main">
+<div class="page-head"><div><h1>Room Availability</h1><p>Live room status, updated automatically.</p></div></div>
+<section id="summary" class="stats" aria-label="Summary"></section>
+<section class="panel"><div class="panel-head"><h2>Rooms</h2><div id="toolbar" class="toolbar"></div></div>
+<div id="list" class="grid"><p class="msg">Loading rooms…</p></div></section></main>
+<script src="js/config.js"></script><script src="js/common.js"></script>
+<script>
+let rooms = [];
+function draw() {
+  const l = filtered(rooms);
+  $('#list').innerHTML = l.length ? l.map(r => `<div class="room-card"><b>Room ${esc(r.roomNumber)}</b><span class="muted">${esc(r.roomType)} · Floor ${esc(r.floor)}</span>${r.description ? `<span>${esc(r.description)}</span>` : ''}${badge(r.availability)}</div>`).join('')
+    : '<p class="msg">No rooms match your search.</p>';
+}
+function pubSummary() {
+  const a = rooms.filter(r => r.availability === 'Available').length;
+  $('#summary').innerHTML = statTile('Total Rooms', rooms.length, 'bed', '') + statTile('Available', a, 'checkCircle', 'available') + statTile('Unavailable', rooms.length - a, 'ban', 'unavailable');
+}
+async function load() {
+  try { rooms = (await api('/public/rooms', { noRedirect: true })).map(normRoom); pubSummary(); draw(); }
+  catch { $('#list').innerHTML = '<p class="msg error">Could not load rooms. Please try again.</p>'; }
+}
+initShell(draw, { publicView: true }); load(); setInterval(load, 20000);
+</script></body></html>

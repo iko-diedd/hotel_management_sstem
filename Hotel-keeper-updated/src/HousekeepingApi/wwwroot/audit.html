@@ -1,0 +1,39 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Audit log</title><script src="js/theme.js"></script><link rel="stylesheet" href="css/app.css"></head>
+<body>
+<header class="app-bar" id="appbar"></header>
+<main class="wrap" id="main">
+<div class="page-head"><div><h1>Audit log</h1><p>Who changed what, and when. Newest first.</p></div></div>
+<section class="panel"><div class="panel-head"><h2>Events</h2>
+<form id="ff" class="toolbar"><input id="fa" list="acts" placeholder="Action" aria-label="Filter by action" maxlength="100"><datalist id="acts"></datalist>
+<input id="fd1" type="date" aria-label="From date"><input id="fd2" type="date" aria-label="To date"><button class="btn primary" id="go"></button></form></div>
+<div class="tw"><table class="stack"><thead><tr><th scope="col">Time</th><th scope="col">User</th><th scope="col">Action</th><th scope="col" class="hide-sm">Entity</th><th scope="col">Details</th></tr></thead>
+<tbody id="rows"><tr><td colspan="5" class="msg">Loading…</td></tr></tbody></table></div>
+<div class="panel-head" style="margin:12px 0 0"><span id="pg" class="muted"></span><div class="actions"><button class="btn" id="prev" type="button">Previous</button><button class="btn" id="next" type="button">Next</button></div></div>
+</section></main>
+<script src="js/config.js"></script><script src="js/common.js"></script>
+<script>
+requireRole();
+const ACTIONS = ['LoginFailed', 'LoginSucceeded', 'PasswordChanged', 'PasswordReset', 'UserCreated', 'UserUpdated', 'RoomCreated', 'RoomUpdated', 'RoomDeleted', 'RoomStatusChanged', 'RoomRestored', 'NoticeCreated', 'NoticeStatusChanged', 'NoticeAssigned'];
+$('#acts').innerHTML = ACTIONS.map(a => `<option value="${esc(a)}">`).join('');
+$('#go').innerHTML = icon('search') + 'Filter';
+let page = 1, pages = 1;
+async function load() {
+  const p = new URLSearchParams({ page, pageSize: 50 });
+  const a = $('#fa').value.trim(); if (a) p.set('type', a);
+  if ($('#fd1').value) p.set('from', new Date($('#fd1').value + 'T00:00:00').toISOString());
+  if ($('#fd2').value) p.set('to', new Date($('#fd2').value + 'T23:59:59.999').toISOString());
+  try {
+    const r = await api('/admin/audit?' + p);
+    pages = Math.max(1, Math.ceil(r.totalCount / r.pageSize));
+    $('#rows').innerHTML = r.items.length ? r.items.map(e => `<tr><td>${fmt(e.timestamp)}</td><td>${esc(e.userName || '—')}</td><td><b>${esc(e.action)}</b></td>
+      <td class="hide-sm">${esc(e.entityType)}${e.entityId ? ' #' + esc(e.entityId) : ''}</td><td>${esc(e.details || '')}</td></tr>`).join('') : msgRow(5, 'No events match.');
+    $('#pg').textContent = `Page ${r.page} of ${pages} · ${r.totalCount} events`;
+    $('#prev').disabled = r.page <= 1; $('#next').disabled = r.page >= pages;
+  } catch (x) { $('#rows').innerHTML = msgRow(5, x.message, true); }
+}
+$('#ff').onsubmit = e => { e.preventDefault(); page = 1; load(); };
+$('#prev').onclick = () => { page--; load(); };
+$('#next').onclick = () => { page++; load(); };
+initShell(); load();
+</script></body></html>

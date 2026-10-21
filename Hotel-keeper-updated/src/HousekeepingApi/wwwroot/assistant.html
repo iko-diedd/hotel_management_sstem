@@ -1,0 +1,77 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Room Assistant</title><script src="js/theme.js"></script><link rel="stylesheet" href="css/app.css"></head>
+<body>
+<header class="app-bar" id="appbar"></header>
+<main class="wrap" id="main">
+<div class="page-head"><div><h1>Room Assistant</h1><p>Update room status and send housekeeping notices.</p></div>
+<button class="btn primary" id="toggle" aria-expanded="false" aria-controls="notice"></button></div>
+<section id="summary" class="stats" aria-label="Summary"></section>
+<div class="split solo" id="layout">
+<section class="panel" id="notice" hidden><div class="panel-head"><h2>Housekeeping notice</h2></div>
+<form id="nf"><label>Room number<select id="nroom" required></select></label>
+<label>Notice message<textarea id="nmsg" maxlength="300" required></textarea></label>
+<label>Date and time<input id="ndt" type="datetime-local" readonly></label>
+<button class="btn primary" id="send"></button></form></section>
+<section class="panel"><div class="panel-head"><h2>Rooms</h2><div id="toolbar" class="toolbar"></div></div>
+<div class="tw"><table class="stack"><thead><tr><th scope="col">Room</th><th scope="col" class="hide-sm">Type</th><th scope="col">Status</th><th scope="col">Availability</th><th scope="col" class="hide-sm">Last updated</th><th scope="col">Actions</th></tr></thead>
+<tbody id="rows"><tr><td colspan="6" class="msg">Loading rooms…</td></tr></tbody></table></div></section>
+</div></main>
+<script src="js/config.js"></script><script src="js/common.js"></script>
+<script>
+requireRole('RoomAssistant');
+const DEFAULT_MSG = 'Guest returned the room key. Cleaning required.';
+let rooms = [];
+const form = $('#notice');
+$('#send').innerHTML = icon('send') + 'Send notice';
+function stamp() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); $('#ndt').value = d.toISOString().slice(0, 16); }
+function setForm(open) {
+  form.hidden = !open; $('#layout').classList.toggle('solo', !open);
+  $('#toggle').setAttribute('aria-expanded', open); $('#toggle').innerHTML = open ? 'Close notice form' : icon('plus') + 'New housekeeping notice'; if (open) stamp();
+}
+$('#toggle').onclick = () => setForm(form.hidden);
+setForm(false);
+const OOS = n => btn('', 'ban', { data: { a: 'oos', r: n }, cls: 'danger', tip: 'Take out of service' });
+function actions(r) {
+  const n = r.roomNumber, d = a => ({ a, r: n });
+  switch (r.status) {
+    case 'Available': return btn('Mark occupied', 'user', { data: d('occupy') }) + btn('Send notice', 'send', { data: d('notice') }) + OOS(n);
+    case 'Occupied': return btn('Key returned', 'key', { data: d('keyret') }) + OOS(n);
+    case 'Dirty': return btn('Send notice', 'send', { data: d('notice') }) + OOS(n);
+    case 'Cleaning': return btn('Confirm ready', 'checkCircle', { data: d('avail'), cls: 'primary', tip: 'Confirm the room is unoccupied and ready, then mark it Available' }) + OOS(n);
+    default: return '<span class="muted">Admin restores this room</span>';
+  }
+}
+function draw() {
+  const l = filtered(rooms);
+  $('#rows').innerHTML = l.length ? l.map(r => `<tr><td><b>${esc(r.roomNumber)}</b></td><td class="hide-sm">${esc(r.roomType)}</td><td>${badge(r.status)}</td><td>${esc(r.availability)}</td><td class="hide-sm">${fmt(r.lastUpdatedAt)}</td><td><div class="actions">${actions(r)}</div></td></tr>`).join('') : msgRow(6, 'No rooms match your search.');
+}
+const setStatus = (room, body) => api(`/rooms/${room.id}/status`, { method: 'PATCH', body: { ...body, expectedVersion: room.version } });
+$('#rows').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return; const n = b.dataset.r, room = rooms.find(r => r.roomNumber === n); if (!room) return;
+  const a = b.dataset.a;
+  try {
+    if (a === 'notice' || a === 'keyret') { $('#nroom').value = n; $('#nmsg').value = DEFAULT_MSG; setForm(true); $('#nmsg').focus(); return; }
+    if (a === 'occupy') await setStatus(room, { status: 'Occupied' });
+    else if (a === 'avail') {
+      if (!await confirmBox(`Confirm room ${n} is unoccupied and ready for use?`, 'Yes, mark Available')) return;
+      await setStatus(room, { status: 'Available', confirmUnoccupiedAndReady: true });
+    } else if (a === 'oos') {
+      const reason = await askText(`Why is room ${n} going out of service?`, { placeholder: 'e.g. Broken air conditioning' });
+      if (!reason) return;
+      await setStatus(room, { status: 'OutOfService', reason });
+    }
+    toast(`Room ${n} updated.`); load();
+  } catch (x) { toast(x.message, true); load(); }
+};
+$('#nf').onsubmit = async e => {
+  e.preventDefault();
+  try { await api('/notices', { method: 'POST', body: { roomNumber: $('#nroom').value, message: $('#nmsg').value } });
+    toast(`Notice sent for room ${$('#nroom').value}.`); setForm(false); load(); } catch (x) { toast(x.message, true); }
+};
+async function load() {
+  try { rooms = (await api('/rooms')).map(normRoom); } catch (x) { $('#rows').innerHTML = msgRow(6, x.message, true); return; }
+  const cur = $('#nroom').value; $('#nroom').innerHTML = rooms.map(r => `<option>${esc(r.roomNumber)}</option>`).join(''); if (cur) $('#nroom').value = cur;
+  summary(rooms); draw();
+}
+initShell(draw); load(); setInterval(load, 15000);
+</script></body></html>

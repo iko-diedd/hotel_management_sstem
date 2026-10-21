@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Staff Sign In</title><script src="js/theme.js"></script><link rel="stylesheet" href="css/app.css"></head>
+<body>
+<header class="app-bar" id="appbar"></header>
+<main class="wrap" id="main">
+<section class="panel login"><h1>Staff sign in</h1><p class="muted">Use the account issued by your administrator.</p>
+<form id="lf"><label>Username<input id="u" autocomplete="username" required maxlength="50" autofocus></label>
+<label>Password<input id="p" type="password" autocomplete="current-password" required maxlength="128"></label>
+<p id="err" class="msg error" role="alert" hidden></p>
+<button class="btn primary" id="go">Sign in</button></form></section></main>
+<script src="js/config.js"></script><script src="js/common.js"></script>
+<script>
+const u0 = auth.user; if (auth.token && u0) location.replace(ROLE_HOME[u0.role] || 'index.html');
+initShell();
+$('#go').innerHTML = icon('login') + 'Sign in';
+$('#lf').onsubmit = async e => {
+  e.preventDefault(); $('#err').hidden = true; $('#go').disabled = true;
+  try {
+    const r = await api('/auth/login', { method: 'POST', noRedirect: true, body: { username: $('#u').value, password: $('#p').value } });
+    auth.set(r.accessToken, r.user);
+    const next = new URLSearchParams(location.search).get('next');
+    const allowed = (Object.values(ROLE_HOME).includes(next) || ADMIN_PAGES.includes(next)) && (r.user.role === 'Admin' || next === ROLE_HOME[r.user.role]);
+    location.replace(allowed ? next : ROLE_HOME[r.user.role]);
+  } catch (x) {
+    $('#err').textContent = x.status === 401 ? 'Invalid username or password.' : x.message; $('#err').hidden = false; $('#go').disabled = false;
+  }
+};
+</script></body></html>
